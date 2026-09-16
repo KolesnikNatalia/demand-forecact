@@ -1,0 +1,4 @@
+Первый коммит: каркас uv (pyproject.toml, .gitignore, пустой README.md), CLAUDE.md
+с правилами проекта и предпосылками предметной области, скиллы commit и
+clickhouse-best-practices (ClickHouse Inc, Apache-2.0, v0.4.0).
+.python-version в коммит не вошёл: он перечислен в .gitignore.
