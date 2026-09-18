@@ -15,5 +15,7 @@ tmp/
 *.parquet
 *.log
 *.csv
+*_tmp.*
+
 # Секреты
 .env
