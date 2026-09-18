@@ -1,0 +1,5 @@
+- src/lib/settings.py: класс Paths хранит каталоги (корень проекта, корень данных, слои main_data/prepared/features/forecast/checks/tmp, logs), класс ClickHouseConnection — подключение из .env. Загрузка падает, если в config.yaml лишний или недостающий ключ. paths.ensure() создаёт каталоги результатов в начале прогона. DF_DATA_DIR переопределяет корень данных.
+- config.yaml: корень данных, каталоги слоёв и каталог логов.
+- .env.example: шаблон CH_HOST, CH_PORT, CH_USER, CH_PSWD и DF_DATA_DIR.
+- src/lib/clickhouse.py: подключение берётся из config.clickhouse вместо os.getenv. src/lib добавляется в sys.path до импорта logger, поэтому модуль импортируется из любого каталога.
+- src/lib/logger.py: каталог логов берётся из paths.logs.
