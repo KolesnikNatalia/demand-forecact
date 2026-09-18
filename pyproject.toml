@@ -1,17 +1,17 @@
 [project]
 name = "demand-forecact"
 version = "0.1.0"
-description = "Add your description here"
+description = "Прогнозирование спроса на продукцию собственного производства с малым сроком годности"
 readme = "README.md"
 authors = [
     { name = "Natasha Kolesnik", email = "knv080980@gmail.com" }
 ]
 requires-python = ">=3.13"
-dependencies = []
+dependencies = [
+    "python-dotenv>=1.2.3",
+]
 
-[project.scripts]
-demand-forecact = "demand_forecact:main"
-
-[build-system]
-requires = ["uv_build>=0.12.9,<0.13.0"]
-build-backend = "uv_build"
+[tool.uv]
+# Проект — набор скриптов (main.py + src/lib/), а не устанавливаемый пакет,
+# поэтому uv его не собирает: нет ни build-system, ни src/demand_forecact/.
+package = false
