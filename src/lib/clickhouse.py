@@ -5,12 +5,10 @@ import subprocess
 import enum
 import pathlib
 from abc import ABC, abstractmethod;
+
+sys.path.append(os.fspath(pathlib.Path(__file__).resolve().parent)) # через относительный путь подключаем settings
 from logger import logger
-from dotenv import load_dotenv, find_dotenv
-
-
-sys.path.append(os.fspath(pathlib.Path(__file__).resolve().parents[1])) # через относительный путь подключаем settings
-load_dotenv(find_dotenv()) # Чтение из .env
+from settings import config # подключение к ClickHouse — из .env через settings
 
 
 # CONSTANT
@@ -23,10 +21,10 @@ CLICKHOUSE_DATE_NULL = datetime.date(1970,1,1)
 # Connection to ClickHouse client settings
 # ----------------------------------------
 connection = {
-    'host' : os.getenv('CH_HOST')
-    , 'port' : os.getenv('CH_PORT')
-    , 'user' : os.getenv('CH_USER')
-    , 'password' : os.getenv('CH_PSWD')
+    'host' : config.clickhouse.host
+    , 'port' : config.clickhouse.port
+    , 'user' : config.clickhouse.user
+    , 'password' : config.clickhouse.password
     , 'database' : None
     , 'multiline' : None
     , 'multiquery' : None

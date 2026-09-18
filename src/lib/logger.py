@@ -13,7 +13,8 @@ import sys, os
 import logging
 import pathlib
 import datetime
-sys.path.append(os.fspath(pathlib.Path(__file__).resolve().parents[1])) # через относительный путь подключаем settings
+sys.path.append(os.fspath(pathlib.Path(__file__).resolve().parent)) # через относительный путь подключаем settings
+from settings import paths
 
 
 # Logger
@@ -23,11 +24,10 @@ logger.setLevel(logging.DEBUG)
 
 # print(param.log_file)
 
-log_dir = pathlib.Path(__file__).parents[2] / 'logs'
-log_dir.mkdir(parents=True, exist_ok=True)
+paths.logs.mkdir(parents=True, exist_ok=True) # FileHandler каталог не создаёт
 
 handler_file = logging.FileHandler(
-    filename=log_dir / f'{datetime.date.today():%Y_%m_%d}.log',
+    filename=paths.logs / f'{datetime.date.today():%Y_%m_%d}.log',
     mode='a+',
     encoding='utf-8')
 handler_file.setLevel(logging.DEBUG)
