@@ -1,0 +1,7 @@
+Состав:
+- src/lib/clickhouse.py: запуск clickhouse-client и clickhouse-local через --queries-file. Параметры подключения берутся из .env (CH_HOST, CH_PORT, CH_USER, CH_PSWD). Также здесь классы форматов файлов (CSV, Native, Parquet, Null) и шаблон запроса, который разворачивает иерархию в массивы уровней.
+- src/lib/logger.py: пишет в файл logs/ГГГГ_ММ_ДД.log (уровень DEBUG) и в stdout (уровень WARNING).
+- scripts/ch-server.sh: команды start/stop/restart/status/log для локального ClickHouse, установленного одним бинарником в /clickhouse.
+- pyproject.toml: добавлены описание проекта и зависимость python-dotenv. Убраны project.scripts и build-system, задано tool.uv.package = false.
+- .gitignore: добавлены tmp/, *.log, *.csv и .env.
+Пустые config.yaml и main.py в коммит не вошли.
