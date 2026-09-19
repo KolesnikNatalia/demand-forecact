@@ -1,0 +1,4 @@
+Закрывает этап 1 docs/research_plan.md: насколько ряды прогнозируемы, какие в них закономерности и достижима ли цель заказчика хотя бы в пределе.
+- prd/prd-store-item-time-series-analysis.md: цель, сценарии, скоуп, ограничения и критерии готовности.
+- prd/plan-store-item-time-series-analysis.md: 14 этапов, от подготовки дневных рядов до итогового отчёта docs/series_analysis.md.
+- docs/research_plan.md: к этапу 1 добавлены ссылки на PRD и план.
