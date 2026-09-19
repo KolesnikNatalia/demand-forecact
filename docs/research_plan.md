@@ -31,6 +31,9 @@
 
 Цель — понять предел точности **до** выбора моделей и решить, где прогноз нужен,
 а где достаточно правила запаса.
+Требования к этапу — [prd-store-item-time-series-analysis.md](../prd/prd-store-item-time-series-analysis.md),
+план реализации — [plan-store-item-time-series-analysis.md](../prd/plan-store-item-time-series-analysis.md).
+Результат — отчёт `docs/series_analysis.md`.
 
 - Классификация рядов: ADI / CV² (квадранты Syntetos–Boylan), доля нулей, уровень
   продаж, недельный ритм — раздельно для `кг` и `шт`.
