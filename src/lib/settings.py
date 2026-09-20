@@ -47,8 +47,9 @@ class Paths:
     prepared: pathlib.Path   # подготовленный слой
     features: pathlib.Path   # признаки
     forecast: pathlib.Path   # прогнозы и заказ
+    analysis: pathlib.Path   # результаты анализа рядов
     checks: pathlib.Path     # результаты проверок качества
-    tmp: pathlib.Path        # промежуточные файлы и SQL-команды
+    tmp: pathlib.Path        # только файлы SQL-команд
     logs: pathlib.Path       # логи
 
     def ensure(self):
@@ -60,7 +61,8 @@ class Paths:
         """
         if not self.main_data.is_dir():
             raise FileNotFoundError(f"нет каталога сырых данных: {self.main_data}")
-        for path in (self.prepared, self.features, self.forecast, self.checks, self.tmp, self.logs):
+        for path in (self.prepared, self.features, self.forecast, self.analysis,
+                     self.checks, self.tmp, self.logs):
             path.mkdir(parents=True, exist_ok=True)
 
 
