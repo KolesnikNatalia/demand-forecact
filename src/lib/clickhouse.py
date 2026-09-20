@@ -83,7 +83,9 @@ def flush_service(service_name:str = CLICKHOUSE_SERVICE, wait_sec:int = 5):
     os.system(f"service {service_name} restart") # перегружаем службу
     time.sleep(wait_sec) # отправляем в сон
 
-def exec_local(command:str, command_file:str, save_file:str = '', save_format:str = default_file_format):
+def exec_local(command:str, command_file:str, save_file:str = '', save_format:str = default_file_format, return_result=False):
+    # return_result — вернуть stdout запроса. Нужен для маленьких результатов
+    # (строки проверок, сводные таблицы отчёта): их незачем гонять через файл.
     # Если задан запрос в виде текста command и указан файл save_file
     # для сохранения результата, то добавляем команду выгрузки к запросу
     if save_file:
@@ -105,6 +107,8 @@ def exec_local(command:str, command_file:str, save_file:str = '', save_format:st
     if( result[0] != 0):
         log("### Exception: {0} {1}".format(result[1], open(command_file, 'r').read()))
         raise Exception("### Exception: {0} {1}".format(result[1], open(command_file, 'r').read()))
+    if return_result:
+        return result[1]
 
 
 def exec_client(command:str, command_file:str, save_file:str = '', save_format:str = default_file_format, try_max:int = 0, wait_sec:int = 5, return_result=False):
