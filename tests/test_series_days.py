@@ -214,6 +214,23 @@ def test_checks_pass_on_fixture(layer):
     assert returns.Status == 'warning' and returns.Value == 1
 
 
+def test_report_collects_issues(layer):
+    """
+    Замечания собираются в отчёт прогона, а не только идут строкой в лог.
+
+    Отдельная позиция расчёт не останавливает, поэтому потерять её нельзя:
+    разбирать замечание будет человек, возможно назавтра.
+    """
+    _, paths, _ = layer
+    reports = sorted(paths.checks.glob('series_days_checks_*.md'))
+    assert reports, 'отчёт проверок не записан'
+
+    report = reports[-1].read_text(encoding='utf-8')
+    assert '## Замечания и ошибки' in report
+    assert 'days_returns_zeroed' in report          # замечание вынесено наверх
+    assert '| days_key_unique |' in report          # и полная таблица тоже на месте
+
+
 def test_duplicate_key_stops(workspace):
     """Дубль ключа «день × пара» останавливает шаг."""
     paths, profile = workspace

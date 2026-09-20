@@ -14,7 +14,7 @@
 | `Value`, `Threshold` | измеренное значение и порог |
 | `Status` | `ok`, `error` или `warning` |
 | `Details` | числа, по которым видно, что именно разошлось |
-| `RunAt` | время прогона |
+| `RunAt` | время прогона, местное, строкой (parquet хранит `DateTime` в UTC) |
 
 Журнал — файл на прогон в `data/checks/`: parquet не дописывают, а история
 нужна, поэтому старые файлы остаются и читаются маской
@@ -36,6 +36,8 @@ from logger import logger
 
 
 SUM_TOLERANCE = 1e-9  # относительный допуск сравнения сумм слоя и сырья
+
+EXAMPLES_IN_DETAILS = 10  # сколько позиций показать в замечании, чтобы было с чего начать разбор
 
 
 def _totals_branch(source_cte: str, branch_case: str, branches, days_file, paths) -> pathlib.Path:
@@ -107,6 +109,10 @@ def _totals_source(main_glob, period, measures, paths) -> pathlib.Path:
             , toUInt64(uniqExactIf(ItemId, {unknown})) as UnknownItems
             , arrayStringConcat(arraySort(groupUniqArrayIf(trim(ifNull(ItemMeasure, '')),
                                                            {unknown})), ', ') as UnknownMeasures
+            -- по каким позициям это случилось: без примеров замечание нечем разбирать
+            , arrayStringConcat(arraySlice(arraySort(groupUniqArrayIf(
+                  concat(ifNull(ItemId, ''), ' (', trim(ifNull(ItemMeasure, '')), ')'),
+                  {unknown})), 1, {EXAMPLES_IN_DETAILS}), ', ') as UnknownExamples
         from file('{main_glob}')
         where {period_filter}
         {sql.PARQUET_SETTINGS}
@@ -169,7 +175,7 @@ def _totals_all(days_file, arrays_file, paths) -> pathlib.Path:
     return save_file
 
 
-def _checks_sql(branch_file, all_file, source_file) -> str:
+def _checks_sql(branch_file, all_file, source_file, run_at) -> str:
     """Строки журнала проверок из посчитанных сумм и счётчиков."""
     tolerance = f"toFloat64({SUM_TOLERANCE})"
     return f"""with t_B as (
@@ -188,7 +194,9 @@ def _checks_sql(branch_file, all_file, source_file) -> str:
             , Threshold
             , if(Value <= Threshold, 'ok', Level) as Status
             , Details
-            , now() as RunAt
+            -- время прогона строкой: parquet хранит DateTime в UTC, и при чтении
+            -- журнала время разъезжалось бы с логом и с именем файла
+            , {run_at} as RunAt
         from (
             select
                 concat('days_sales_qty_', Branch) as CheckName
@@ -234,6 +242,7 @@ def _checks_sql(branch_file, all_file, source_file) -> str:
                 , concat('строк с единицей вне профиля: ', toString(UnknownRows)
                        , ', товаров: ', toString(UnknownItems)
                        , ', единицы: ', if(UnknownMeasures = '', '—', UnknownMeasures)
+                       , if(UnknownExamples = '', '', concat('. Товары: ', UnknownExamples))
                        , '. Такие ряды в слой не попадают: ветку задаёт раздел branches профиля')
             from t_S
             union all
@@ -333,14 +342,51 @@ def check_days(files: dict, cfg: dict, paths) -> list:
 
     # микросекунды в имени: два прогона подряд не должны затирать друг друга,
     # журнал — это история проверок
-    stamp = datetime.datetime.now().strftime('%Y%m%d_%H%M%S_%f')
+    started = datetime.datetime.now()
+    stamp = started.strftime('%Y%m%d_%H%M%S_%f')
     journal_file = paths.checks / f'series_days_checks_{stamp}.parquet'
-    clickhouse.exec_local(_checks_sql(branch_file, all_file, source_file),
+    clickhouse.exec_local(_checks_sql(branch_file, all_file, source_file,
+                                      sql.literal(started.strftime('%Y-%m-%d %H:%M:%S'))),
                           paths.tmp / 'series_checks.sql', journal_file, 'Parquet')
 
     rows = _read(journal_file, paths)
-    _report(rows, journal_file)
+    report_file = _write_report(rows, journal_file, paths)
+    _report(rows, report_file)
     return rows
+
+
+def _write_report(rows: list, journal_file, paths) -> pathlib.Path:
+    """
+    Отчёт прогона рядом с журналом: замечания вверху, полная таблица ниже.
+
+    Отдельный файл нужен потому, что в логе замечание про одну позицию теряется
+    среди сообщений шага, а разбирать его будет человек — возможно, назавтра.
+    Таблицу готовит сам ClickHouse (`FORMAT Markdown`) из журнала прогона.
+    """
+    report_file = journal_file.with_suffix('.md')
+    table = clickhouse.exec_local(
+        f"""select CheckName as `Проверка`, Status as `Статус`, Value as `Значение`
+                 , Threshold as `Порог`, Details as `Подробности`
+            from file('{journal_file}') format Markdown""",
+        paths.tmp / 'series_checks_report.sql', return_result=True)
+
+    issues = [row for row in rows if row['Status'] != 'ok']
+    lines = [f"# Проверки слоя дневных рядов — {rows[0]['RunAt'] if rows else ''}", '',
+             f"Проверок {len(rows)}: ошибок {sum(r['Status'] == 'error' for r in rows)}, "
+             f"замечаний {sum(r['Status'] == 'warning' for r in rows)}.", '']
+
+    if issues:
+        lines.append('## Замечания и ошибки')
+        lines.append('')
+        lines += [f"- **{row['CheckName']}** ({row['Status']}): {row['Details']}" for row in issues]
+        lines.append('')
+    else:
+        lines += ['Замечаний нет.', '']
+
+    lines += ['## Все проверки', '', table or '', '',
+              f"Журнал прогона: `{journal_file}`", '']
+    report_file.write_text('\n'.join(lines), encoding='utf-8')
+    return report_file
 
 
 def _read(journal_file, paths) -> list:
@@ -352,8 +398,15 @@ def _read(journal_file, paths) -> list:
     return [json.loads(line) for line in (text or '').splitlines() if line.strip()]
 
 
-def _report(rows: list, journal_file):
-    """Записать результат в лог и остановить прогон, если есть error."""
+def _report(rows: list, report_file):
+    """
+    Подвести итог прогона и остановить его, если есть error.
+
+    Замечания собираются в один блок в конце, а не только идут построчно по ходу
+    дела: отдельная позиция с незнакомой единицей расчёт не останавливает — иначе
+    одна SKU оставила бы без прогноза всю сеть, — но и потеряться среди сообщений
+    шага она не должна.
+    """
     errors = [r for r in rows if r['Status'] == 'error']
     warnings = [r for r in rows if r['Status'] == 'warning']
 
@@ -362,10 +415,14 @@ def _report(rows: list, journal_file):
         (logger.error if row['Status'] == 'error' else
          logger.warning if row['Status'] == 'warning' else logger.info)(message)
 
-    logger.info(f"проверок {len(rows)}: ошибок {len(errors)}, предупреждений {len(warnings)}"
-                f" → {journal_file}")
+    summary = [f"итог проверок: всего {len(rows)}, ошибок {len(errors)}, замечаний {len(warnings)}"]
+    summary += [f"  [{row['Status']}] {row['CheckName']}: {row['Details']}"
+                for row in errors + warnings]
+    summary.append(f"  отчёт: {report_file}")
+    # уровень warning, чтобы итог был виден в консоли, а не только в файле лога
+    (logger.warning if errors or warnings else logger.info)('\n'.join(summary))
 
     if errors:
         details = '; '.join(f"{r['CheckName']}: {r['Details']}" for r in errors)
         raise ValueError(f"слой дневных рядов не прошёл проверки ({len(errors)}): {details}. "
-                         f"Журнал: {journal_file}")
+                         f"Отчёт: {report_file}")
