@@ -244,12 +244,14 @@ def _step_arrays(days_file, save_file, paths) -> pathlib.Path:
     return _exec(command, 'series_arrays', save_file, paths)
 
 
-def _settings(profile, paths) -> dict:
+def run_settings(profile, paths) -> dict:
     """
     Разобрать профиль: то, что нужно и расчёту, и проверкам.
 
     Собирается в одном месте, чтобы проверки сверяли слой с тем же источником,
-    из которого он построен, а не с похожим.
+    из которого он построен, а не с похожим. По той же причине функция открытая:
+    её зовут следующие шаги анализа — иначе у каждого был бы свой «почти такой же»
+    источник, и расхождение сумм списали бы на него.
     """
     period = profile.section('period', {'start', 'end'})
     branches = profile.value('branches')
@@ -302,7 +304,7 @@ def run(profile, paths=None, checks=False) -> dict:
     paths = paths or settings.paths
     paths.ensure()
 
-    cfg = _settings(profile, paths)
+    cfg = run_settings(profile, paths)
     files = _result_files(paths)
 
     branch_case = sql.branch_case(cfg['branches'], 's.ItemMeasure')
@@ -344,7 +346,7 @@ def check(profile, paths=None) -> list:
             f"нечего проверять, слой не посчитан: нет файлов {', '.join(missing)}. "
             f"Сначала запустите шаг без --checks-only")
 
-    return series_checks.check_days(files, _settings(profile, paths), paths)
+    return series_checks.check_days(files, run_settings(profile, paths), paths)
 
 
 if __name__ == '__main__':

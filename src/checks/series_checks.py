@@ -4,35 +4,21 @@
 Проверка не чинит данные, а останавливает прогон: расчёт на сломанном слое
 дал бы правдоподобные цифры, по которым потом принимали бы решения.
 
-Каждая проверка формулируется одинаково — «значение не больше порога», поэтому
-статус считается общим правилом, а строки складываются в один журнал:
-
-| колонка | что |
-|---|---|
-| `CheckName` | имя проверки |
-| `Level` | `error` — останавливает прогон, `warning` — только запись в лог |
-| `Value`, `Threshold` | измеренное значение и порог |
-| `Status` | `ok`, `error` или `warning` |
-| `Details` | числа, по которым видно, что именно разошлось |
-| `RunAt` | время прогона, местное, строкой (parquet хранит `DateTime` в UTC) |
-
-Журнал — файл на прогон в `data/checks/`: parquet не дописывают, а история
-нужна, поэтому старые файлы остаются и читаются маской
-`series_days_checks_*.parquet`.
+Суммы считаются отдельными запросами в parquet (`preamble`), а сами проверки —
+строками `union all` (`body`). Журнал, отчёт и остановку прогона делает общий
+модуль `checks_journal`: он одинаков для всех слоёв.
 
 Суммы сравниваются с допуском: `Float64`, сложенные в другом порядке, расходятся
 в последних битах (в сырье есть `0.8260000000000001`).
 """
 
-import datetime
-import json
 import pathlib
 import sys
 
 sys.path.append(f"{pathlib.Path(__file__).resolve().parents[1]}/lib")  # модули src/lib
+import checks_journal
 import clickhouse
 import sql
-from logger import logger
 
 
 SUM_TOLERANCE = 1e-9  # относительный допуск сравнения сумм слоя и сырья
@@ -175,10 +161,9 @@ def _totals_all(days_file, arrays_file, paths) -> pathlib.Path:
     return save_file
 
 
-def _checks_sql(branch_file, all_file, source_file, run_at) -> str:
-    """Строки журнала проверок из посчитанных сумм и счётчиков."""
-    tolerance = f"toFloat64({SUM_TOLERANCE})"
-    return f"""with t_B as (
+def _preamble(branch_file, all_file, source_file) -> str:
+    """Посчитанные суммы и счётчики как CTE: журнал выбирает из них строки проверок."""
+    return f"""t_B as (
             select * from file('{branch_file}')
         )
         , t_A as (
@@ -187,18 +172,13 @@ def _checks_sql(branch_file, all_file, source_file, run_at) -> str:
         , t_S as (
             select * from file('{source_file}')
         )
-        select
-            CheckName
-            , Level
-            , Value
-            , Threshold
-            , if(Value <= Threshold, 'ok', Level) as Status
-            , Details
-            -- время прогона строкой: parquet хранит DateTime в UTC, и при чтении
-            -- журнала время разъезжалось бы с логом и с именем файла
-            , {run_at} as RunAt
-        from (
-            select
+    """
+
+
+def _body() -> str:
+    """Строки журнала проверок из посчитанных сумм и счётчиков."""
+    tolerance = f"toFloat64({SUM_TOLERANCE})"
+    return f"""            select
                 concat('days_sales_qty_', Branch) as CheckName
                 , 'error' as Level
                 , toFloat64(abs(Qty - SrcQty) / greatest(abs(SrcQty), 1)) as Value
@@ -315,10 +295,6 @@ def _checks_sql(branch_file, all_file, source_file, run_at) -> str:
                 , toFloat64(0)
                 , concat('строк с обнулённым возвратом: ', toString(ReturnRows))
             from t_A
-        )
-        -- сначала то, из-за чего прогон встал, потом предупреждения, потом ok
-        order by multiIf(Status = 'error', 0, Status = 'warning', 1, 2), CheckName
-        {sql.PARQUET_SETTINGS}
     """
 
 
@@ -340,89 +316,7 @@ def check_days(files: dict, cfg: dict, paths) -> list:
     all_file = _totals_all(files['days'], files['arrays'], paths)
     source_file = _totals_source(cfg['main_glob'], cfg['period'], cfg['measures'], paths)
 
-    # микросекунды в имени: два прогона подряд не должны затирать друг друга,
-    # журнал — это история проверок
-    started = datetime.datetime.now()
-    stamp = started.strftime('%Y%m%d_%H%M%S_%f')
-    journal_file = paths.checks / f'series_days_checks_{stamp}.parquet'
-    clickhouse.exec_local(_checks_sql(branch_file, all_file, source_file,
-                                      sql.literal(started.strftime('%Y-%m-%d %H:%M:%S'))),
-                          paths.tmp / 'series_checks.sql', journal_file, 'Parquet')
-
-    rows = _read(journal_file, paths)
-    report_file = _write_report(rows, journal_file, paths)
-    _report(rows, report_file)
-    return rows
-
-
-def _write_report(rows: list, journal_file, paths) -> pathlib.Path:
-    """
-    Отчёт прогона рядом с журналом: замечания вверху, полная таблица ниже.
-
-    Отдельный файл нужен потому, что в логе замечание про одну позицию теряется
-    среди сообщений шага, а разбирать его будет человек — возможно, назавтра.
-    Таблицу готовит сам ClickHouse (`FORMAT Markdown`) из журнала прогона.
-    """
-    report_file = journal_file.with_suffix('.md')
-    table = clickhouse.exec_local(
-        f"""select CheckName as `Проверка`, Status as `Статус`, Value as `Значение`
-                 , Threshold as `Порог`, Details as `Подробности`
-            from file('{journal_file}') format Markdown""",
-        paths.tmp / 'series_checks_report.sql', return_result=True)
-
-    issues = [row for row in rows if row['Status'] != 'ok']
-    lines = [f"# Проверки слоя дневных рядов — {rows[0]['RunAt'] if rows else ''}", '',
-             f"Проверок {len(rows)}: ошибок {sum(r['Status'] == 'error' for r in rows)}, "
-             f"замечаний {sum(r['Status'] == 'warning' for r in rows)}.", '']
-
-    if issues:
-        lines.append('## Замечания и ошибки')
-        lines.append('')
-        lines += [f"- **{row['CheckName']}** ({row['Status']}): {row['Details']}" for row in issues]
-        lines.append('')
-    else:
-        lines += ['Замечаний нет.', '']
-
-    lines += ['## Все проверки', '', table or '', '',
-              f"Журнал прогона: `{journal_file}`", '']
-    report_file.write_text('\n'.join(lines), encoding='utf-8')
-    return report_file
-
-
-def _read(journal_file, paths) -> list:
-    """Прочитать журнал обратно: строк десяток, файл ради этого не нужен."""
-    # порядок файла сохраняется: в нём сначала то, из-за чего прогон встал
-    text = clickhouse.exec_local(
-        f"select * from file('{journal_file}') format JSONEachRow",
-        paths.tmp / 'series_checks_read.sql', return_result=True)
-    return [json.loads(line) for line in (text or '').splitlines() if line.strip()]
-
-
-def _report(rows: list, report_file):
-    """
-    Подвести итог прогона и остановить его, если есть error.
-
-    Замечания собираются в один блок в конце, а не только идут построчно по ходу
-    дела: отдельная позиция с незнакомой единицей расчёт не останавливает — иначе
-    одна SKU оставила бы без прогноза всю сеть, — но и потеряться среди сообщений
-    шага она не должна.
-    """
-    errors = [r for r in rows if r['Status'] == 'error']
-    warnings = [r for r in rows if r['Status'] == 'warning']
-
-    for row in rows:
-        message = f"проверка {row['CheckName']}: {row['Status']} — {row['Details']}"
-        (logger.error if row['Status'] == 'error' else
-         logger.warning if row['Status'] == 'warning' else logger.info)(message)
-
-    summary = [f"итог проверок: всего {len(rows)}, ошибок {len(errors)}, замечаний {len(warnings)}"]
-    summary += [f"  [{row['Status']}] {row['CheckName']}: {row['Details']}"
-                for row in errors + warnings]
-    summary.append(f"  отчёт: {report_file}")
-    # уровень warning, чтобы итог был виден в консоли, а не только в файле лога
-    (logger.warning if errors or warnings else logger.info)('\n'.join(summary))
-
-    if errors:
-        details = '; '.join(f"{r['CheckName']}: {r['Details']}" for r in errors)
-        raise ValueError(f"слой дневных рядов не прошёл проверки ({len(errors)}): {details}. "
-                         f"Отчёт: {report_file}")
+    return checks_journal.run(
+        'series_days', 'Проверки слоя дневных рядов',
+        _preamble(branch_file, all_file, source_file), _body(),
+        paths, 'слой дневных рядов не прошёл проверки')
