@@ -20,3 +20,8 @@ dependencies = [
 # Проект — набор скриптов (main.py + src/lib/), а не устанавливаемый пакет,
 # поэтому uv его не собирает: нет ни build-system, ни src/demand_forecact/.
 package = false
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+]
