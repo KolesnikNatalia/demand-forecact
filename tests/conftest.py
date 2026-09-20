@@ -19,13 +19,14 @@ import sys
 import pytest
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
-for module_dir in ('src/lib', 'src/checks', 'src/preprocessing'):
+for module_dir in ('src/lib', 'src/checks', 'src/preprocessing', 'src/analysis'):
     sys.path.append(f"{ROOT}/{module_dir}")
 sys.path.append(str(pathlib.Path(__file__).resolve().parent))  # fixtures.py
 
 import fixtures  # noqa: E402
 import params  # noqa: E402
 import series_days  # noqa: E402
+import series_profile  # noqa: E402
 import settings  # noqa: E402
 
 
@@ -47,6 +48,8 @@ stock_threshold:
   шт: 1
   кг: 0.1
 life: active_span
+demand_class: {{adi: 1.32, cv2: 0.49}}
+abc: {{thresholds: [0.80, 0.95]}}
 """
 
 
@@ -89,3 +92,21 @@ def layer_no_checks(workspace):
     fixtures.write_main_data(paths.main_data)
     files = series_days.run(profile, paths=paths)
     return files, paths, profile
+
+
+@pytest.fixture
+def profile_layer(layer):
+    """Профиль рядов поверх слоя этапа 1, с проверками."""
+    _, paths, profile = layer
+    files = series_profile.run(profile, paths=paths, checks=True)
+    return files, paths, profile
+
+
+@pytest.fixture
+def quadrant_profile(workspace):
+    """Профиль по фикстуре квадрантов: четыре пары, по одной на класс спроса."""
+    paths, profile = workspace
+    fixtures.write_parquet(fixtures.quadrant_rows(),
+                           paths.main_data / 'main_data_2026_05.parquet')
+    series_days.run(profile, paths=paths)
+    return series_profile.run(profile, paths=paths), paths, profile
