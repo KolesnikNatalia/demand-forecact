@@ -194,6 +194,7 @@ profiles/            конфиги прогонов и эксперименто
 src/lib/             settings, clickhouse, logger                есть
 src/preprocessing/   шаги подготовки данных: SQL + run(cfg, ...)  создан
 src/analysis/        шаги анализа рядов: профиль, меры, граница возможного  создан
+src/report/          построитель сводных таблиц и сборка docs/series_analysis.md  создан
 src/checks/          тесты данных и мониторинг дрейфа             создан
 src/models/          модели, бэктест, метрики
 src/flows/           Prefect flows поверх run(...)
