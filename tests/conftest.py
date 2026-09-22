@@ -19,7 +19,8 @@ import sys
 import pytest
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
-for module_dir in ('src/lib', 'src/checks', 'src/preprocessing', 'src/analysis'):
+for module_dir in ('src/lib', 'src/checks', 'src/preprocessing', 'src/analysis',
+                   'src/report'):
     sys.path.append(f"{ROOT}/{module_dir}")
 sys.path.append(str(pathlib.Path(__file__).resolve().parent))  # fixtures.py
 
@@ -27,6 +28,7 @@ import fixtures  # noqa: E402
 import params  # noqa: E402
 import series_days  # noqa: E402
 import series_profile  # noqa: E402
+import series_report  # noqa: E402
 import settings  # noqa: E402
 
 
@@ -110,3 +112,19 @@ def quadrant_profile(workspace):
                            paths.main_data / 'main_data_2026_05.parquet')
     series_days.run(profile, paths=paths)
     return series_profile.run(profile, paths=paths), paths, profile
+
+
+@pytest.fixture
+def report(profile_layer):
+    """
+    Отчёт поверх профиля рядов, с проверками.
+
+    Файл отчёта — в каталоге теста, а не в `docs/`: каталог документации лежит
+    в репозитории, и `DF_DATA_DIR` его не уводит. Поэтому у `run()` нет умолчания
+    для пути отчёта — без него вызов падает, а не пишет поверх рабочего
+    `docs/series_analysis.md`.
+    """
+    _, paths, profile = profile_layer
+    files = series_report.run(profile, paths=paths, checks=True,
+                              report_file=paths.data / 'series_analysis.md')
+    return files, paths, profile
