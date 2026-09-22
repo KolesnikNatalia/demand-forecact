@@ -258,15 +258,15 @@ def test_abc_thresholds_come_from_profile(layer):
 def test_checks_pass_on_fixture(profile_layer):
     """На целой фикстуре проверки проходят, а пустые ряды дают замечание."""
     _, paths, _ = profile_layer
-    journals = sorted(paths.checks.glob('series_profile_checks_*.parquet'))
-    assert journals, 'журнал проверок не записан'
+    journal = paths.checks / 'series_profile_checks.parquet'
+    assert journal.is_file(), 'журнал проверок не записан'
 
-    rows = pd.read_parquet(journals[-1])
+    rows = pd.read_parquet(journal)
     assert not (rows.Status == 'error').any()
     empty = rows[rows.CheckName == 'profile_empty_pairs'].iloc[0]
     assert empty.Status == 'warning' and empty.Value == 1
 
-    report = sorted(paths.checks.glob('series_profile_checks_*.md'))[-1]
+    report = paths.checks / 'series_profile_checks.md'
     assert 'profile_empty_pairs' in report.read_text(encoding='utf-8')
 
 

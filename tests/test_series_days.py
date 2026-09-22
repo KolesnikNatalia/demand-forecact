@@ -8,6 +8,7 @@
 import pandas as pd
 import pytest
 
+import checks_journal
 import clickhouse
 import fixtures
 import params
@@ -205,13 +206,53 @@ def test_arrays_gaps(layer):
 def test_checks_pass_on_fixture(layer):
     """На целой фикстуре проверки проходят, возвраты дают warning."""
     files, paths, _ = layer
-    journals = sorted(paths.checks.glob('series_days_checks_*.parquet'))
-    assert journals, 'журнал проверок не записан'
+    journal = paths.checks / 'series_days_checks.parquet'
+    assert journal.is_file(), 'журнал проверок не записан'
 
-    rows = pd.read_parquet(journals[-1])
+    rows = pd.read_parquet(journal)
     assert not (rows.Status == 'error').any()
     returns = rows[rows.CheckName == 'days_returns_zeroed'].iloc[0]
     assert returns.Status == 'warning' and returns.Value == 1
+
+
+def test_checks_overwrite_previous_run(layer):
+    """
+    Повторный прогон перезаписывает журнал, а не кладёт рядом второй файл.
+
+    Интересен последний результат: слой либо проходит проверки сейчас, либо нет.
+    Имя с меткой времени за год прогонов оставило бы тысячи файлов, среди
+    которых не найти текущий (решение 2026-09-20). Время прогона при этом
+    не теряется: оно в колонке `RunAt`.
+    """
+    _, paths, profile = layer
+    before = sorted(path.name for path in paths.checks.glob('series_days_checks*'))
+
+    series_days.check(profile, paths=paths)
+
+    assert sorted(path.name for path in paths.checks.glob('series_days_checks*')) == before
+    assert before == ['series_days_checks.md', 'series_days_checks.parquet']
+    assert pd.read_parquet(paths.checks / 'series_days_checks.parquet').RunAt.nunique() == 1
+
+
+def test_failed_checks_leave_no_stale_report(layer):
+    """
+    Упавший запрос проверок не оставляет отчёт прошлого прогона.
+
+    С постоянным именем файла старый `.md` со словами «Замечаний нет» читался бы
+    как результат нового прогона, хотя этот прогон ничего не сверил (ревью этапа 3,
+    2026-09-22). Упавший прогон оставляет отсутствие файлов, а не чужие файлы.
+    """
+    _, paths, _ = layer
+    report = paths.checks / 'series_days_checks.md'
+    assert report.is_file(), 'отчёт первого прогона не записан'
+
+    with pytest.raises(Exception, match='Exception'):
+        checks_journal.run('series_days', 'Проверки дневных рядов',
+                           't_A as (select 1 as x)', 'select не_запрос from t_A',
+                           paths, 'слой не прошёл проверки')
+
+    assert not report.exists()
+    assert not (paths.checks / 'series_days_checks.parquet').exists()
 
 
 def test_report_collects_issues(layer):
@@ -222,10 +263,10 @@ def test_report_collects_issues(layer):
     разбирать замечание будет человек, возможно назавтра.
     """
     _, paths, _ = layer
-    reports = sorted(paths.checks.glob('series_days_checks_*.md'))
-    assert reports, 'отчёт проверок не записан'
+    report_file = paths.checks / 'series_days_checks.md'
+    assert report_file.is_file(), 'отчёт проверок не записан'
 
-    report = reports[-1].read_text(encoding='utf-8')
+    report = report_file.read_text(encoding='utf-8')
     assert '## Замечания и ошибки' in report
     assert 'days_returns_zeroed' in report          # замечание вынесено наверх
     assert '| days_key_unique |' in report          # и полная таблица тоже на месте
@@ -282,11 +323,12 @@ def test_checks_run_only_on_demand(layer_no_checks):
     """Регулярный расчёт проверки не гоняет: их запускают отдельно."""
     files, paths, profile = layer_no_checks
 
+    journal = paths.checks / 'series_days_checks.parquet'
     assert files['days'].exists()
-    assert not list(paths.checks.glob('series_days_checks_*.parquet'))
+    assert not journal.is_file()
 
     series_days.check(profile, paths=paths)
-    assert list(paths.checks.glob('series_days_checks_*.parquet'))
+    assert journal.is_file()
 
 
 def test_empty_period_stops(workspace):
@@ -307,8 +349,7 @@ def test_empty_period_stops(workspace):
 def test_journal_lists_failures_first(layer):
     """В журнале сначала то, из-за чего прогон встал, потом предупреждения."""
     files, paths, _ = layer
-    journal = sorted(paths.checks.glob('series_days_checks_*.parquet'))[-1]
-    rows = pd.read_parquet(journal)
+    rows = pd.read_parquet(paths.checks / 'series_days_checks.parquet')
 
     order = {'error': 0, 'warning': 1, 'ok': 2}
     ranks = [order[status] for status in rows.Status]
