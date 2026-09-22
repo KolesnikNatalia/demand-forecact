@@ -47,6 +47,9 @@ STEPS = (
     {'name': 'series_profile',
      'script': 'src/analysis/series_profile.py',
      'about': 'этап 2: профиль рядов — история, класс спроса, дефицит, ABC'},
+    {'name': 'series_report',
+     'script': 'src/report/series_report.py',
+     'about': 'этап 3: отчёт — шапка с отпечатком данных и раздел «Популяция»'},
 )
 
 PROFILE_FILE = settings.paths.root / 'profiles' / 'series_analysis.yaml'

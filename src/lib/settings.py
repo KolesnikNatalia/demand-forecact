@@ -51,6 +51,7 @@ class Paths:
     checks: pathlib.Path     # результаты проверок качества
     tmp: pathlib.Path        # только файлы SQL-команд
     logs: pathlib.Path       # логи
+    docs: pathlib.Path       # отчёты анализа: лежат в git, а не в data/
 
     def ensure(self):
         """
@@ -62,7 +63,7 @@ class Paths:
         if not self.main_data.is_dir():
             raise FileNotFoundError(f"нет каталога сырых данных: {self.main_data}")
         for path in (self.prepared, self.features, self.forecast, self.analysis,
-                     self.checks, self.tmp, self.logs):
+                     self.checks, self.tmp, self.logs, self.docs):
             path.mkdir(parents=True, exist_ok=True)
 
 
@@ -98,10 +99,10 @@ def _check_keys(section: dict, expected: set, where: str):
 
 def _load_paths(cfg: dict, config_file: pathlib.Path) -> Paths:
     section = cfg.get('paths') or {}
-    _check_keys(section, {'data', 'layers', 'logs'}, f"{config_file}, раздел paths")
+    _check_keys(section, {'data', 'layers', 'logs', 'docs'}, f"{config_file}, раздел paths")
 
     layers = section.get('layers') or {}
-    layer_names = {f.name for f in fields(Paths)} - {'root', 'data', 'logs'}
+    layer_names = {f.name for f in fields(Paths)} - {'root', 'data', 'logs', 'docs'}
     _check_keys(layers, layer_names, f"{config_file}, раздел paths.layers")
 
     data = _resolve(os.getenv(DATA_DIR_ENV) or section['data'], ROOT)
@@ -109,6 +110,9 @@ def _load_paths(cfg: dict, config_file: pathlib.Path) -> Paths:
         root=ROOT,
         data=data,
         logs=_resolve(section['logs'], ROOT),
+        # отчёты — от корня проекта, а не от корня данных: DF_DATA_DIR уводит данные
+        # на другой диск, а документация остаётся в репозитории
+        docs=_resolve(section['docs'], ROOT),
         **{name: _resolve(value, data) for name, value in layers.items()},
     )
 

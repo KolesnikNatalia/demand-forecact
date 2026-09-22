@@ -13,6 +13,14 @@ SQL шагов живёт в самих шагах — здесь только �
 """
 
 
+# Сегменты ассортимента: спорные подгруппы идут в сводках отдельной строкой
+# и в основные итоги не входят. Значения заданы здесь, а не литералами по месту:
+# слой их проставляет, а построитель отчёта по ним сортирует и считает итоги,
+# и разойтись эти две стороны не должны
+SCOPE_MAIN = 'основные'
+SCOPE_DISPUTED = 'спорные'
+
+
 # Выход шага — parquet со сжатием zstd: файлы читаются много раз,
 # а место и время чтения экономит один и тот же набор настроек
 PARQUET_SETTINGS = "settings output_format_parquet_compression_method = 'zstd'"
@@ -71,8 +79,8 @@ def branch_case(branches: dict, column: str = 'ItemMeasure') -> str:
 def scope_case(disputed, column: str = 'ItemIdLevel2') -> str:
     """Подгруппа → `основные` или `спорные` (в основные итоги спорные не входят)."""
     if not disputed:
-        return "'основные'"
-    return f"if({column} in ({quoted(disputed)}), 'спорные', 'основные')"
+        return literal(SCOPE_MAIN)
+    return f"if({column} in ({quoted(disputed)}), {literal(SCOPE_DISPUTED)}, {literal(SCOPE_MAIN)})"
 
 
 def source_select(main_glob, start_date, end_date, returns: str, measures) -> str:
